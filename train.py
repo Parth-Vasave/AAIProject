@@ -1,236 +1,144 @@
-# Copyright (c) 2018-2021, RangerUFO
-#
-# This file is part of cycle_gan.
-#
-# cycle_gan is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# cycle_gan is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with cycle_gan.  If not, see <https://www.gnu.org/licenses/>.
-
-
 import os
 import time
-import random
 import argparse
-import mxnet as mx
-from dataset import load_dataset, get_batches
-from pix2pix_gan import ResnetGenerator, PatchDiscriminator, GANInitializer
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from dataset import CycleGANDataset, reconstruct_color
+from pix2pix_gan import ResnetGenerator, PatchDiscriminator
 from image_pool import ImagePool
 
-def train(dataset, start_epoch, max_epochs, lr_d, lr_g, batch_size, lmda_cyc, lmda_idt, pool_size, context):
-    mx.random.seed(int(time.time()))
-
-    print("Loading dataset...", flush=True)
-    training_set_a = load_dataset(dataset, "trainA")
-    training_set_b = load_dataset(dataset, "trainB")
-
-    gen_ab = ResnetGenerator()
-    dis_b = PatchDiscriminator()
-    gen_ba = ResnetGenerator()
-    dis_a = PatchDiscriminator()
-    bce_loss = mx.gluon.loss.SigmoidBinaryCrossEntropyLoss()
-    l1_loss = mx.gluon.loss.L1Loss()
-
-    gen_ab_params_file = "model/{}.gen_ab.params".format(dataset)
-    dis_b_params_file = "model/{}.dis_b.params".format(dataset)
-    gen_ab_state_file = "model/{}.gen_ab.state".format(dataset)
-    dis_b_state_file = "model/{}.dis_b.state".format(dataset)
-    gen_ba_params_file = "model/{}.gen_ba.params".format(dataset)
-    dis_a_params_file = "model/{}.dis_a.params".format(dataset)
-    gen_ba_state_file = "model/{}.gen_ba.state".format(dataset)
-    dis_a_state_file = "model/{}.dis_a.state".format(dataset)
-
-    if os.path.isfile(gen_ab_params_file):
-        gen_ab.load_parameters(gen_ab_params_file, ctx=context)
-    else:
-        gen_ab.initialize(GANInitializer(), ctx=context)
-
-    if os.path.isfile(dis_b_params_file):
-        dis_b.load_parameters(dis_b_params_file, ctx=context)
-    else:
-        dis_b.initialize(GANInitializer(), ctx=context)
-
-    if os.path.isfile(gen_ba_params_file):
-        gen_ba.load_parameters(gen_ba_params_file, ctx=context)
-    else:
-        gen_ba.initialize(GANInitializer(), ctx=context)
-
-    if os.path.isfile(dis_a_params_file):
-        dis_a.load_parameters(dis_a_params_file, ctx=context)
-    else:
-        dis_a.initialize(GANInitializer(), ctx=context)
-
-    print("Learning rate of discriminator:", lr_d, flush=True)
-    print("Learning rate of generator:", lr_g, flush=True)
-    trainer_gen_ab = mx.gluon.Trainer(gen_ab.collect_params(), "Nadam", {
-        "learning_rate": lr_g,
-        "beta1": 0.5
-    })
-    trainer_dis_b = mx.gluon.Trainer(dis_b.collect_params(), "Nadam", {
-        "learning_rate": lr_d,
-        "beta1": 0.5
-    })
-    trainer_gen_ba = mx.gluon.Trainer(gen_ba.collect_params(), "Nadam", {
-        "learning_rate": lr_g,
-        "beta1": 0.5
-    })
-    trainer_dis_a = mx.gluon.Trainer(dis_a.collect_params(), "Nadam", {
-        "learning_rate": lr_d,
-        "beta1": 0.5
-    })
-
-    if os.path.isfile(gen_ab_state_file):
-        trainer_gen_ab.load_states(gen_ab_state_file)
-
-    if os.path.isfile(dis_b_state_file):
-        trainer_dis_b.load_states(dis_b_state_file)
-
-    if os.path.isfile(gen_ba_state_file):
-        trainer_gen_ba.load_states(gen_ba_state_file)
-
-    if os.path.isfile(dis_a_state_file):
-        trainer_dis_a.load_states(dis_a_state_file)
-
-    fake_a_pool = ImagePool(pool_size)
-    fake_b_pool = ImagePool(pool_size)
-
-    print("Training...", flush=True)
-    for epoch in range(start_epoch, max_epochs):
-        ts = time.time()
-
-        random.shuffle(training_set_a)
-        random.shuffle(training_set_b)
-
-        training_dis_a_L = 0.0
-        training_dis_b_L = 0.0
-        training_gen_L = 0.0
-        training_batch = 0
-
-        for real_a, real_b in get_batches(training_set_a, training_set_b, batch_size, ctx=context):
-            training_batch += 1
-            
-            fake_a, _ = gen_ba(real_b)
-            fake_b, _ = gen_ab(real_a)
-
-            with mx.autograd.record():
-                real_a_y, real_a_cam_y = dis_a(real_a)
-                real_a_L = bce_loss(real_a_y, mx.nd.ones_like(real_a_y, ctx=context))
-                real_a_cam_L = bce_loss(real_a_cam_y, mx.nd.ones_like(real_a_cam_y, ctx=context))
-                fake_a_y, fake_a_cam_y = dis_a(fake_a_pool.query(fake_a))
-                fake_a_L = bce_loss(fake_a_y, mx.nd.zeros_like(fake_a_y, ctx=context))
-                fake_a_cam_L = bce_loss(fake_a_cam_y, mx.nd.zeros_like(fake_a_cam_y, ctx=context))
-                L = real_a_L + real_a_cam_L + fake_a_L + fake_a_cam_L
-                L.backward()
-            trainer_dis_a.step(batch_size)
-            dis_a_L = mx.nd.mean(L).asscalar()
-            if dis_a_L != dis_a_L:
-                raise ValueError()
-
-            with mx.autograd.record():
-                real_b_y, real_b_cam_y = dis_b(real_b)
-                real_b_L = bce_loss(real_b_y, mx.nd.ones_like(real_b_y, ctx=context))
-                real_b_cam_L = bce_loss(real_b_cam_y, mx.nd.ones_like(real_b_cam_y, ctx=context))
-                fake_b_y, fake_b_cam_y = dis_b(fake_b_pool.query(fake_b))
-                fake_b_L = bce_loss(fake_b_y, mx.nd.zeros_like(fake_b_y, ctx=context))
-                fake_b_cam_L = bce_loss(fake_b_cam_y, mx.nd.zeros_like(fake_b_cam_y, ctx=context))
-                L = real_b_L + real_b_cam_L + fake_b_L + fake_b_cam_L
-                L.backward()
-            trainer_dis_b.step(batch_size)
-            dis_b_L = mx.nd.mean(L).asscalar()
-            if dis_b_L != dis_b_L:
-                raise ValueError()
-
-            with mx.autograd.record():
-                fake_a, gen_a_cam_y = gen_ba(real_b)
-                fake_a_y, fake_a_cam_y = dis_a(fake_a)
-                gan_a_L = bce_loss(fake_a_y, mx.nd.ones_like(fake_a_y, ctx=context))
-                gan_a_cam_L = bce_loss(fake_a_cam_y, mx.nd.ones_like(fake_a_cam_y, ctx=context))
-                rec_b, _ = gen_ab(fake_a)
-                cyc_b_L = l1_loss(rec_b, real_b)
-                idt_a, idt_a_cam_y = gen_ba(real_a)
-                idt_a_L = l1_loss(idt_a, real_a)
-                gen_a_cam_L = bce_loss(gen_a_cam_y, mx.nd.ones_like(gen_a_cam_y, ctx=context)) + bce_loss(idt_a_cam_y, mx.nd.zeros_like(idt_a_cam_y, ctx=context))
-                gen_ba_L = gan_a_L + gan_a_cam_L + cyc_b_L * lmda_cyc + idt_a_L * lmda_cyc * lmda_idt + gen_a_cam_L
-                fake_b, gen_b_cam_y = gen_ab(real_a)
-                fake_b_y, fake_b_cam_y = dis_b(fake_b)
-                gan_b_L = bce_loss(fake_b_y, mx.nd.ones_like(fake_b_y, ctx=context))
-                gan_b_cam_L = bce_loss(fake_b_cam_y, mx.nd.ones_like(fake_b_cam_y, ctx=context))
-                rec_a, _ = gen_ba(fake_b)
-                cyc_a_L = l1_loss(rec_a, real_a)
-                idt_b, idt_b_cam_y = gen_ab(real_b)
-                idt_b_L = l1_loss(idt_b, real_b)
-                gen_b_cam_L = bce_loss(gen_b_cam_y, mx.nd.ones_like(gen_b_cam_y, ctx=context)) + bce_loss(idt_b_cam_y, mx.nd.zeros_like(idt_b_cam_y, ctx=context))
-                gen_ab_L = gan_b_L + gan_b_cam_L + cyc_a_L * lmda_cyc + idt_b_L * lmda_cyc * lmda_idt + gen_b_cam_L
-                L = gen_ba_L + gen_ab_L
-                L.backward()
-            trainer_gen_ba.step(batch_size)
-            trainer_gen_ab.step(batch_size)
-            gen_L = mx.nd.mean(L).asscalar()
-            if gen_L != gen_L:
-                raise ValueError()
-
-            training_dis_a_L += dis_a_L
-            training_dis_b_L += dis_b_L
-            training_gen_L += gen_L
-            print("[Epoch %d  Batch %d]  dis_a_loss %.10f  dis_b_loss %.10f  gen_loss %.10f  elapsed %.2fs" % (
-                epoch, training_batch, dis_a_L, dis_b_L, gen_L, time.time() - ts
-            ), flush=True)
-
-        print("[Epoch %d]  training_dis_a_loss %.10f  training_dis_b_loss %.10f  training_gen_loss %.10f  duration %.2fs" % (
-            epoch + 1, training_dis_a_L / training_batch, training_dis_b_L / training_batch, training_gen_L / training_batch, time.time() - ts
-        ), flush=True)
-
-        gen_ab.save_parameters(gen_ab_params_file)
-        gen_ba.save_parameters(gen_ba_params_file)
-        dis_a.save_parameters(dis_a_params_file)
-        dis_b.save_parameters(dis_b_params_file)
-        trainer_gen_ab.save_states(gen_ab_state_file)
-        trainer_gen_ba.save_states(gen_ba_state_file)
-        trainer_dis_a.save_states(dis_a_state_file)
-        trainer_dis_b.save_states(dis_b_state_file)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Start a cycle_gan trainer.")
-    parser.add_argument("--dataset", help="set the dataset used by the trainer (default: vangogh2photo)", type=str, default="vangogh2photo")
-    parser.add_argument("--start_epoch", help="set the start epoch (default: 0)", type=int, default=0)
-    parser.add_argument("--max_epochs", help="set the max epochs (default: 100)", type=int, default=100)
-    parser.add_argument("--lr_d", help="set the learning rate of discriminator (default: 0.0003)", type=float, default=0.0003)
-    parser.add_argument("--lr_g", help="set the learning rate of generator (default: 0.0001)", type=float, default=0.0001)
-    parser.add_argument("--batch_size", help="set the batch size (default: 32)", type=int, default=32)
-    parser.add_argument("--lmda_cyc", help="set the lambda of cycle loss (default: 10.0)", type=float, default=10.0)
-    parser.add_argument("--lmda_idt", help="set the lambda of identity loss (default: 0.5)", type=float, default=0.5)
-    parser.add_argument("--device_id", help="select device that the model using (default: 0)", type=int, default=0)
-    parser.add_argument("--gpu", help="using gpu acceleration", action="store_true")
+def train():
+    parser = argparse.ArgumentParser(description="Start a PyTorch CycleGAN trainer.")
+    parser.add_argument("--dataset", help="dataset name (default: vangogh2photo)", type=str, default="vangogh2photo")
+    parser.add_argument("--data_root", help="path to 'data' directory", type=str, default="data")
+    parser.add_argument("--start_epoch", help="start epoch (default: 0)", type=int, default=0)
+    parser.add_argument("--max_epochs", help="max epochs (default: 200)", type=int, default=200)
+    parser.add_argument("--lr", help="learning rate (default: 0.0002)", type=float, default=0.0002)
+    parser.add_argument("--batch_size", help="batch size (default: 1)", type=int, default=1)
+    parser.add_argument("--lambda_cyc", help="lambda of cycle loss (default: 10.0)", type=float, default=10.0)
+    parser.add_argument("--lambda_idt", help="lambda of identity loss (default: 0.5)", type=float, default=0.5)
+    parser.add_argument("--device", help="cuda, mps, or cpu", type=str, default=None)
     args = parser.parse_args()
 
-    if args.gpu:
-        context = mx.gpu(args.device_id)
+    # Device detection
+    if args.device:
+        device = torch.device(args.device)
     else:
-        context = mx.cpu(args.device_id)
+        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    print(f"Training on device: {device}")
 
-    while True:
-        try:
-            train(
-                dataset = args.dataset,
-                start_epoch = args.start_epoch,
-                max_epochs = args.max_epochs,
-                lr_d = args.lr_d,
-                lr_g = args.lr_g,
-                batch_size = args.batch_size,
-                lmda_cyc = args.lmda_cyc,
-                lmda_idt = args.lmda_idt,
-                pool_size = 50,
-                context = context
-            )
-            break;
-        except ValueError:
-            print("Oops! The value of loss become NaN...")
+    # Data loading
+    print("Loading dataset...", flush=True)
+    dataset_a = CycleGANDataset(args.data_root, args.dataset, "trainA")
+    dataset_b = CycleGANDataset(args.data_root, args.dataset, "trainB")
+    
+    # Simple strategy: use the length of the smaller dataset
+    min_len = min(len(dataset_a), len(dataset_b))
+    loader_a = DataLoader(dataset_a, batch_size=args.batch_size, shuffle=True, num_workers=2)
+    loader_b = DataLoader(dataset_b, batch_size=args.batch_size, shuffle=True, num_workers=2)
+
+    # Models
+    gen_ab = ResnetGenerator().to(device)
+    gen_ba = ResnetGenerator().to(device)
+    dis_a = PatchDiscriminator().to(device)
+    dis_b = PatchDiscriminator().to(device)
+
+    # Optimizers
+    optimizer_G = optim.Adam(
+        list(gen_ab.parameters()) + list(gen_ba.parameters()),
+        lr=args.lr, betas=(0.5, 0.999)
+    )
+    optimizer_D_A = optim.Adam(dis_a.parameters(), lr=args.lr, betas=(0.5, 0.999))
+    optimizer_D_B = optim.Adam(dis_b.parameters(), lr=args.lr, betas=(0.5, 0.999))
+
+    # Losses
+    criterion_GAN = nn.MSELoss() # Standard for LSGAN
+    criterion_cycle = nn.L1Loss()
+    criterion_identity = nn.L1Loss()
+
+    # Pools
+    fake_a_pool = ImagePool(50)
+    fake_b_pool = ImagePool(50)
+
+    print("Starting training loop...", flush=True)
+    for epoch in range(args.start_epoch, args.max_epochs):
+        start_time = time.time()
+        
+        # Zip loaders to iterate over both datasets
+        # Note: They may have different sizes, zip will stop at the shorter one.
+        for i, (real_a, real_b) in enumerate(zip(loader_a, loader_b)):
+            real_a, real_b = real_a.to(device), real_b.to(device)
+            
+            # --- Train Generators ---
+            optimizer_G.zero_grad()
+            
+            # Identity loss
+            loss_id_a = criterion_identity(gen_ba(real_a)[0], real_a) * args.lambda_cyc * args.lambda_idt
+            loss_id_b = criterion_identity(gen_ab(real_b)[0], real_b) * args.lambda_cyc * args.lambda_idt
+            
+            # GAN loss
+            fake_b, cam_b = gen_ab(real_a)
+            pred_fake_b, _ = dis_b(fake_b)
+            loss_GAN_ab = criterion_GAN(pred_fake_b, torch.ones_like(pred_fake_b))
+            
+            fake_a, cam_a = gen_ba(real_b)
+            pred_fake_a, _ = dis_a(fake_a)
+            loss_GAN_ba = criterion_GAN(pred_fake_a, torch.ones_like(pred_fake_a))
+            
+            # Cycle loss
+            rec_a, _ = gen_ba(fake_b)
+            loss_cycle_a = criterion_cycle(rec_a, real_a) * args.lambda_cyc
+            
+            rec_b, _ = gen_ab(fake_a)
+            loss_cycle_b = criterion_cycle(rec_b, real_b) * args.lambda_cyc
+            
+            # Total G loss
+            loss_G = loss_GAN_ab + loss_GAN_ba + loss_cycle_a + loss_cycle_b + loss_id_a + loss_id_b
+            loss_G.backward()
+            optimizer_G.step()
+            
+            # --- Train Discriminator A ---
+            optimizer_D_A.zero_grad()
+            
+            # Real loss
+            pred_real, _ = dis_a(real_a)
+            loss_D_real = criterion_GAN(pred_real, torch.ones_like(pred_real))
+            
+            # Fake loss (from pool)
+            fake_a_val = fake_a_pool.query(fake_a.detach())
+            pred_fake, _ = dis_a(fake_a_val)
+            loss_D_fake = criterion_GAN(pred_fake, torch.zeros_like(pred_fake))
+            
+            loss_D_A = (loss_D_real + loss_D_fake) * 0.5
+            loss_D_A.backward()
+            optimizer_D_A.step()
+            
+            # --- Train Discriminator B ---
+            optimizer_D_B.zero_grad()
+            
+            # Real loss
+            pred_real, _ = dis_b(real_b)
+            loss_D_real = criterion_GAN(pred_real, torch.ones_like(pred_real))
+            
+            # Fake loss (from pool)
+            fake_b_val = fake_b_pool.query(fake_b.detach())
+            pred_fake, _ = dis_b(fake_b_val)
+            loss_D_fake = criterion_GAN(pred_fake, torch.zeros_like(pred_fake))
+            
+            loss_D_B = (loss_D_real + loss_D_fake) * 0.5
+            loss_D_B.backward()
+            optimizer_D_B.step()
+            
+            if i % 10 == 0:
+                print(f"[Epoch {epoch}/{args.max_epochs}] [Batch {i}] [G loss: {loss_G.item():.4f}] [D loss: {(loss_D_A + loss_D_B).item():.4f}]")
+
+        # Save Checkpoints
+        os.makedirs("model", exist_ok=True)
+        torch.save(gen_ab.state_dict(), f"model/{args.dataset}.gen_ab.pth")
+        torch.save(gen_ba.state_dict(), f"model/{args.dataset}.gen_ba.pth")
+        print(f"End of epoch {epoch} | Time: {time.time() - start_time:.2f}s")
+
+if __name__ == "__main__":
+    train()
