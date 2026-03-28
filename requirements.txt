@@ -1,0 +1,8 @@
+torch>=2.0.0
+torchvision>=0.15.0
+opencv-python
+numpy
+matplotlib
+dlib
+pypng
+# mxnet (only needed if you run the weight conversion script)
