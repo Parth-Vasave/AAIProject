@@ -1,6 +1,21 @@
-import torch
-import mxnet as mx
 import os
+import torch
+import numpy as np
+
+# --- PATCH FOR GOOGLE COLAB / NUMPY 2.x COMPATIBILITY ---
+# MXNet is incompatible with NumPy 2.0. We patch it here before importing.
+if not hasattr(np, 'bool'):
+    np.bool = bool
+if not hasattr(np, 'bool_'):
+    np.bool_ = bool
+# --------------------------------------------------------
+
+try:
+    import mxnet as mx
+except ImportError:
+    print("Error: mxnet is not installed. Run: !pip install mxnet")
+    exit(1)
+
 from pix2pix_gan import ResnetGenerator
 
 def convert_mxnet_to_pytorch(mxnet_params_path, output_pth_path):
