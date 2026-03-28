@@ -8,7 +8,7 @@ def test():
     parser = argparse.ArgumentParser(description="Start a PyTorch cycle_gan tester.")
     parser.add_argument("images", metavar="IMG", help="path of the image file[s]", type=str, nargs="+")
     parser.add_argument("--reversed", help="reverse transformation (B to A)", action="store_true")
-    parser.add_argument("--model", help="model name prefix (default: vangogh2photo)", type=str, default="vangogh2photo")
+    parser.add_argument("--model", help="model name prefix (default: selfie2anime)", type=str, default="selfie2anime")
     parser.add_argument("--resize", help="image resize size (default: 256)", type=int, default=256)
     parser.add_argument("--device", help="cuda, mps, or cpu", type=str, default=None)
     args = parser.parse_args()

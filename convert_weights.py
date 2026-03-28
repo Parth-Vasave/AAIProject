@@ -68,10 +68,22 @@ def convert_mxnet_to_pytorch(mxnet_params_path, output_pth_path):
     print(f"Successfully saved PyTorch weights to {output_pth_path}")
 
 if __name__ == "__main__":
-    mx_path = "model/selfie2anime.gen_ab.params"
-    pt_path = "model/selfie2anime.gen_ab.pth"
+    # Automatically Detect all .params files in the model folder
+    model_dir = "model"
+    if not os.path.exists(model_dir):
+        print(f"Error: {model_dir} directory not found.")
+        exit(1)
+        
+    param_files = [f for f in os.listdir(model_dir) if f.endswith(".params")]
     
-    if os.path.exists(mx_path):
+    if not param_files:
+        print(f"No .params files found in {model_dir}/")
+        exit(1)
+        
+    for p_file in param_files:
+        mx_path = os.path.join(model_dir, p_file)
+        pt_path = mx_path.replace(".params", ".pth")
+        print(f"\n--- Converting {p_file} ---")
         convert_mxnet_to_pytorch(mx_path, pt_path)
-    else:
-        print(f"Source file {mx_path} not found.")
+    
+    print("\n✅ All conversions complete.")

@@ -11,7 +11,7 @@ from image_pool import ImagePool
 
 def train():
     parser = argparse.ArgumentParser(description="Start a PyTorch CycleGAN trainer.")
-    parser.add_argument("--dataset", help="dataset name (default: vangogh2photo)", type=str, default="vangogh2photo")
+    parser.add_argument("--model", help="model prefix (default: selfie2anime)", type=str, default="selfie2anime")
     parser.add_argument("--data_root", help="path to 'data' directory", type=str, default="data")
     parser.add_argument("--start_epoch", help="start epoch (default: 0)", type=int, default=0)
     parser.add_argument("--max_epochs", help="max epochs (default: 200)", type=int, default=200)
