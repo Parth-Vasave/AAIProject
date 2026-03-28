@@ -74,7 +74,7 @@ def run_inference():
                 
             pil_img = Image.fromarray(raw_crop)
             # Resize
-            real = TF.resize(pil_img, args.resize, Image.BICUBIC)
+            real = TF.resize(pil_img, args.resize, transforms.InterpolationMode.BICUBIC)
             # To Tensor and Normalize
             real = TF.to_tensor(real)
             real = TF.normalize(real, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))

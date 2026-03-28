@@ -49,7 +49,7 @@ class CycleGANHandler(http.server.BaseHTTPRequestHandler):
         img = Image.open(io.BytesIO(image_data)).convert('RGB')
         
         # 2. Preprocess
-        real = TF.resize(img, self.server.resize, Image.BICUBIC)
+        real = TF.resize(img, self.server.resize, transforms.InterpolationMode.BICUBIC)
         real = TF.to_tensor(real)
         real = TF.normalize(real, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
         real = real.unsqueeze(0).to(self.server.device)

@@ -1,8 +1,8 @@
-torch>=2.0.0
-torchvision>=0.15.0
+torch>=2.3.0
+torchvision>=0.18.0
+numpy<2.0
 opencv-python
-numpy
 matplotlib
-dlib
+dlib>=19.24.2
 pypng
-# mxnet (only needed if you run the weight conversion script)
+Pillow>=10.0.0

@@ -12,7 +12,7 @@ class CycleGANDataset(Dataset):
         self.data_path = os.path.join(data_root, name, category)
         self.img_files = [os.path.join(self.data_path, f) for f in os.listdir(self.data_path) if f.endswith(('.jpg', '.png', '.jpeg'))]
         self.transform = transforms.Compose([
-            transforms.Resize(int(size * 1.12), Image.BICUBIC),
+            transforms.Resize(int(size * 1.12), transforms.InterpolationMode.BICUBIC),
             transforms.RandomCrop(size),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
@@ -41,7 +41,7 @@ def reconstruct_color(img_tensor):
 # Helper function to load a single image for inference
 def load_image(path, size=256):
     transform = transforms.Compose([
-        transforms.Resize(size, Image.BICUBIC),
+        transforms.Resize(size, transforms.InterpolationMode.BICUBIC),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
