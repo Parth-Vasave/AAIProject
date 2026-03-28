@@ -19,39 +19,31 @@ def convert_mxnet_to_pytorch(mxnet_params_path, output_pth_path):
     
     print("Mapping weights...")
     
-    # This mapping is approximate and based on the sequential nature of both models.
-    # MXNet Gluon names parameters by the order they were created.
-    # PyTorch names them by the module names we assigned.
+    # This mapping is more robust. We look for all weights and internal SN vectors.
+    # MXNet stores SN vectors as '_u', PyTorch as 'weight_u'.
+    mx_keys = [k for k in mx_params.keys()]
+    pt_keys = [k for k in state_dict.keys()]
     
-    # Filter for weights and u vectors (spectral norm)
-    mx_keys = sorted([k for k in mx_params.keys() if 'weight' in k or '_u' in k])
-    pt_keys = sorted([k for k in state_dict.keys() if 'weight' in k or '_u' in k])
+    print(f"Total MXNet parameters: {len(mx_keys)}")
+    print(f"Total PyTorch parameters: {len(pt_keys)}")
     
-    # Note: PyTorch spectral_norm uses 'weight_u' and 'weight_v'. 
-    # MXNet implementation used 'u'.
+    # We map by identifying the type of parameter and its position in the sequence.
+    mx_weights = sorted([k for k in mx_keys if 'weight' in k])
+    mx_u = sorted([k for k in mx_keys if '_u' in k])
     
-    # We will try a heuristic based on the order of layers.
-    # This is often successful for Sequential models.
-    
-    mx_to_pt = {}
-    mx_idx = 0
-    
-    # Separate types
-    mx_weights = [k for k in mx_keys if 'weight' in k]
-    mx_u = [k for k in mx_keys if '_u' in k]
-    
-    pt_weights = [k for k in pt_keys if 'weight' in k and 'orig' in k] # PyTorch SN stores original weight in 'weight_orig'
-    pt_u = [k for k in pt_keys if 'weight_u' in k]
-    
+    # PyTorch weights are either inside 'spectral_norm' (weight_orig) or regular (weight)
+    pt_weights = sorted([k for k in pt_keys if k.endswith('.weight_orig') or (k.endswith('.weight') and 'weight_u' not in k)])
+    pt_u = sorted([k for k in pt_keys if k.endswith('.weight_u')])
+
     if len(mx_weights) != len(pt_weights):
-        print(f"Warning: Count mismatch! MXNet weights: {len(mx_weights)}, PyTorch weights: {len(pt_weights)}")
+        print(f"⚠️ Warning: Weight count mismatch! MX={len(mx_weights)}, PT={len(pt_weights)}")
     
-    # Map weights
+    # Map weights sequentially
     for i in range(min(len(mx_weights), len(pt_weights))):
         mx_val = mx_params[mx_weights[i]].asnumpy()
         state_dict[pt_weights[i]] = torch.from_numpy(mx_val)
         
-    # Map spectral norm 'u' vectors
+    # Map spectral norm 'u' vectors sequentially
     for i in range(min(len(mx_u), len(pt_u))):
         mx_val = mx_params[mx_u[i]].asnumpy()
         state_dict[pt_u[i]] = torch.from_numpy(mx_val)
