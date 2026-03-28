@@ -31,8 +31,8 @@ def train():
 
     # Data loading
     print("Loading dataset...", flush=True)
-    dataset_a = CycleGANDataset(args.data_root, args.dataset, "trainA")
-    dataset_b = CycleGANDataset(args.data_root, args.dataset, "trainB")
+    dataset_a = CycleGANDataset(args.data_root, args.model, "trainA")
+    dataset_b = CycleGANDataset(args.data_root, args.model, "trainB")
     
     # Simple strategy: use the length of the smaller dataset
     min_len = min(len(dataset_a), len(dataset_b))
